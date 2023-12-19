@@ -1,0 +1,53 @@
+pipeline {
+    agent any
+
+    stages {
+        stage('Checkout') {
+            steps {
+                // Check out the code from the version control system (replace with your repository URL)
+                checkout scm
+            }
+        }
+
+        stage('Build Backend') {
+            steps {
+                // Build backend code using Maven (replace with your build command)
+                sh 'mvn clean install'
+            }
+        }
+
+        stage('Test Backend') {
+            steps {
+                // Run backend tests using Maven (replace with your test command)
+                sh 'mvn test'
+            }
+        }
+
+        stage('Build Frontend') {
+            steps {
+                // Install npm dependencies and build frontend code (replace with your frontend build command)
+                sh 'npm install'
+                sh 'npm run build'
+            }
+        }
+
+        stage('Test Frontend') {
+            steps {
+                // Run frontend tests using Jest (replace with your frontend testing command)
+                sh 'npm test'
+            }
+        }
+    }
+
+    post {
+        success {
+            echo 'Build and tests successful!'
+            // Add additional actions for success if needed
+        }
+
+        failure {
+            echo 'Build or tests failed!'
+            // Add additional actions for failure if needed
+        }
+    }
+}

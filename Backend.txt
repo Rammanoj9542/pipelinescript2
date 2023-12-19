@@ -1,0 +1,171 @@
+import os
+from sqlalchemy import create_engine, Column, Integer, String
+from sqlalchemy import inspect
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import sessionmaker
+import random
+from random import shuffle
+from models import *
+import jwt
+from datetime import datetime, timedelta
+from functools import wraps
+import yaml
+from werkzeug.security import generate_password_hash, check_password_hash
+import smtplib
+
+
+interview_fullstack_path = os.path.abspath(os.path.join(os.path.dirname(_file_), '..', 'db'))
+#print ("interview_fullstack_path: "+interview_fullstack_path)
+database_path = os.path.join(interview_fullstack_path, 'questions.db')
+#print ("database_path: "+interview_fullstack_path)
+engine = create_engine(f"sqlite:///{database_path}", echo=True)
+
+# Create a session to interact with the database
+Session = sessionmaker(bind=engine)
+session = Session()
+
+
+def get_db():
+    db = Session()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+# Check if the table "questions" exists in the database
+inspector = inspect(engine)
+if not inspector.has_table("questions"):
+    Base.metadata.create_all(engine)
+
+if not inspector.has_table("users"):
+    Base.metadata.create_all(engine)
+
+if not inspector.has_table("transactions"):
+    Base.metadata.create_all(engine)
+
+existing_questions = session.query(Question).all()
+existing_question_texts = [
+    question.question for question in existing_questions]
+
+# Generate a list of unique qid values for the range 1000 to 9999
+unique_qids = list(range(1, 1001))
+
+
+projectdirectory = os.path.abspath(os.path.join(os.path.dirname(_file_), ".."))
+configdirectory = os.path.join(projectdirectory,"config")
+yaml_file_path = os.path.join(configdirectory,"questions.yaml")
+
+# Initialize an empty topics dictionary
+topics = {}
+
+# Read questions from the YAML file
+with open(yaml_file_path, 'r') as yaml_file:
+    yaml_data = yaml.safe_load(yaml_file)
+    topics_data = yaml_data.get('topics', [])
+    
+    # Iterate over the topics and their questions
+    for topic_data in topics_data:
+        topic_name = topic_data.get('category')
+        questions = topic_data.get('questions', [])
+        
+        # Assign the questions to the topic in the desired format
+        topics[topic_name] = questions
+
+shuffled_topics = list(topics.keys())
+shuffle(shuffled_topics)
+
+# Shuffle the list of unique qids
+shuffle(unique_qids)
+
+# Insert new questions using the shuffled topics and qids
+for topic in shuffled_topics:
+    questions = topics[topic]
+    for question in questions:
+        if question not in existing_question_texts:
+            if not unique_qids:
+                print("Ran out of unique qid values.")
+                break
+
+            random_qid = unique_qids.pop(0)  # Get the next shuffled qid value
+            question_obj = Question(
+                qid=random_qid, question=question, question_type=topic)
+            session.add(question_obj)
+
+# Commit the changes to the database
+session.commit()
+
+
+def get_random_questions(num_questions):
+
+    # Get all questions and filter out those already selected
+    all_questions = session.query(Question).filter(
+        Question.selected_flag == 0).all()
+
+    if num_questions > len(all_questions):
+        session.query(Question).update({Question.selected_flag: 0})
+        all_questions = session.query(Question).filter(
+            Question.selected_flag == 0).all()
+
+    # Reset flags if no more questions available
+    if len(all_questions) == 0:
+        session.query(Question).update({Question.selected_flag: 0})
+        all_questions = session.query(Question).filter(
+            Question.selected_flag == 0).all()
+
+    # Select random questions
+    selected_questions = random.sample(all_questions, num_questions)
+
+    # Update flags
+    for q in selected_questions:
+        q.selected_flag = 1
+
+    session.commit()
+
+    return selected_questions
+
+
+def reset_question_flags():
+    session.query(Question).update({Question.selected_flag: 0})
+    session.commit()
+
+
+def get_available_question_count():
+    return session.query(Question).filter(Question.selected_flag == 0).count()
+
+def get_questions_by_qid(qid_list):
+    try:
+        # Query the database to retrieve questions by qid
+        questions = session.query(Question).filter(Question.qid.in_(qid_list)).all()
+        
+        return questions
+    except Exception as e:
+        # Handle any exceptions or errors here
+        print(f"Error: {e}")
+        return []
+
+def update_question(qid, new_question):
+    # Retrieve the question with the given qid
+    question = session.query(Question).filter_by(qid=qid).first()
+
+    if question:
+        # Update the question
+        question.question = new_question
+        session.commit()
+        print(f"Question with qid {qid} updated successfully.")
+    else:
+        print(f"Question with qid {qid} not found.")
+
+
+def delete_question(qid):
+    # Retrieve the question with the given qid
+    question = session.query(Question).filter_by(qid=qid).first()
+
+    if question:
+        # Delete the question
+        session.delete(question)
+        session.commit()
+        print(f"Question with qid {qid} deleted successfully.")
+    else:
+        print(f"Question with qid {qid} not found.")
